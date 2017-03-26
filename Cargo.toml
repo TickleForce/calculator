@@ -1,5 +1,5 @@
 [package]
-name = "rustycode"
+name = "calc-rust"
 version = "0.1.0"
 authors = ["Kevin <koderkk@gmail.com>"]
 
