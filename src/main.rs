@@ -24,9 +24,9 @@ enum Token {
 
 fn get_variable(name: &str) -> f64 {
     match name {
-        "pi" => 3.1415926535,
+        "pi"  => 3.1415926535,
         "tau" => 3.1415926535*2.0,
-        "e" => 2.7182818284,
+        "e"   => 2.7182818284,
         _ => 0.0
     }
 }
@@ -58,7 +58,7 @@ fn is_numeric(c: char) -> bool {
 
 fn is_unary(last_token: &Token) -> bool {
     match *last_token {
-        Token::LeftParen | Token::Operator{..} | Token::None => true,
+        Token::LeftParen | Token::Comma | Token::Operator{..} | Token::None => true,
         _ => false
     }
 }
@@ -106,7 +106,7 @@ fn push_token(token: Token, stack: &mut Vec<Token>, output: &mut Vec<Token>) -> 
     ret
 }
 
-fn parse(input: &String) -> Vec<Token> {
+fn parse(input: &str) -> Vec<Token> {
     enum ReadState {
         Number,
         Name,
@@ -237,10 +237,14 @@ fn solve(tokens: Vec<Token>) -> f64 {
     *stack.last().unwrap()
 }
 
+fn solve_expression(input: &str) -> f64 {
+    solve(parse(input))
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     if args.len() > 1 {
-        println!("{}", solve(parse(&args[1])));
+        println!("{}", solve_expression(&args[1]));
     }
     else {
         print!(">>> ");
@@ -248,6 +252,14 @@ fn main() {
         let mut input = String::new();
         io::stdin().read_line(&mut input).expect("Failed to read input");
         input.pop();
-        println!("{}", solve(parse(&input)));
+        println!("{}", solve_expression(&input));
     }
+}
+
+#[test]
+fn long_expression() {
+    assert_eq!(100.0, solve_expression(&String::from("
+        ((abs(cos(((((--(abs((((1+1+(1+1)+1+1+(4*1))+1+(10-11))/10 * 10) % 9 - 10)^2-80+9))
+        *10/10+(2*2 + 6)-5-2-(2+1))*2.00000000-5.6-4.400000000000000000000)-9)*pi))*10.0*
+        sign(max(12.44343234, 11.84934))*add4(1.0, 2.0, -1.0, 1.0)/3)^2)+(2*2+2^2*2-2)-10")));
 }
