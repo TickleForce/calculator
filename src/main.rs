@@ -22,83 +22,36 @@ enum Token {
     None
 }
 
-fn get_variable(name: &str) -> Option<f64> {
+fn get_variable(name: &str) -> Result<f64, String> {
     match name {
-        "pi"  => Some(3.1415926535),
-        "tau" => Some(3.1415926535*2.0),
-        "e"   => Some(2.7182818284),
-        _ => None
+        "pi"  => Ok(3.1415926535),
+        "tau" => Ok(3.1415926535*2.0),
+        "e"   => Ok(2.7182818284),
+        _ => Err(format!("Unknown variable '{}'", name))
     }
-}
-
-fn params(name: &str, stack: &mut Vec<f64>, args: usize) -> Result<Vec<f64>, String> {
-    if stack.len() >= args {
-        let index = stack.len() - args;
-        Ok(stack.split_off(index))
-    } 
-    else { Err(format!("Not enough parameters for function '{}'", name)) }
 }
 
 fn run_function(name: &str, p: &mut Vec<f64>) -> Result<f64, String> {
     match name {
-        "sin"  => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].sin()),
-            Err(msg) => Err(msg)
-        },
-        "cos" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].cos()),
-            Err(msg) => Err(msg)
-        },
-        "tan" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].tan()),
-            Err(msg) => Err(msg)
-        },
-        "abs" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].abs()),
-            Err(msg) => Err(msg)
-        },
-        "sign" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].signum()),
-            Err(msg) => Err(msg)
-        },
-        "frac" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].fract()),
-            Err(msg) => Err(msg)
-        },
-        "min" => match params(&name, p, 2) {
+        "sin"  => Ok(params(&name, p, 1, false)?[0].sin()),
+        "cos"  => Ok(params(&name, p, 1, false)?[0].cos()),
+        "tan"  => Ok(params(&name, p, 1, false)?[0].tan()),
+        "abs"  => Ok(params(&name, p, 1, false)?[0].abs()),
+        "sign" => Ok(params(&name, p, 1, false)?[0].signum()),
+        "frac" => Ok(params(&name, p, 1, false)?[0].fract()),
+        "sqrt" => Ok(params(&name, p, 1, false)?[0].sqrt()),
+        "rad"  => Ok(params(&name, p, 1, false)?[0].to_radians()),
+        "deg"  => Ok(params(&name, p, 1, false)?[0].to_degrees()),
+        "min" => match params(&name, p, 2, false) {
             Ok(v) => Ok(f64::min(v[0], v[1])),
             Err(msg) => Err(msg)
         },
-        "max" => match params(&name, p, 2) {
+        "max" => match params(&name, p, 2, false) {
             Ok(v) => Ok(f64::max(v[0], v[1])),
             Err(msg) => Err(msg)
         },
-        "pow" => match params(&name, p, 1) {
+        "pow" => match params(&name, p, 2, false) {
             Ok(v) => Ok(v[0].powf(v[1])),
-            Err(msg) => Err(msg)
-        },
-        "sqrt" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].sqrt()),
-            Err(msg) => Err(msg)
-        },
-        "rad" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].to_radians()),
-            Err(msg) => Err(msg)
-        },
-        "deg" => match params(&name, p, 1) {
-            Ok(v) => Ok(v[0].to_degrees()),
-            Err(msg) => Err(msg)
-        },
-        "add2" => match params(&name, p, 2) {
-            Ok(v) => Ok(v[0] + v[1]),
-            Err(msg) => Err(msg)
-        },
-        "add3" => match params(&name, p, 3) {
-            Ok(v) => Ok(v[0] + v[1] + v[2]),
-            Err(msg) => Err(msg)
-        },
-        "add4" => match params(&name, p, 4) {
-            Ok(v) => Ok(v[0] + v[1] + v[2] + v[3]),
             Err(msg) => Err(msg)
         },
         _ => Err(format!("Unknown function '{}'", name))
@@ -175,20 +128,14 @@ fn parse(input: &str) -> Result<Vec<Token>, String> {
                     if c.is_digit(10) || c == '.' {
                         current_str.push(c);
                         if i+1 == input.len() {
-                            match push_token(Token::Number(current_str.parse().unwrap()), &mut stack, &mut output) {
-                                Ok(token) => last_token = token,
-                                Err(msg) => return Err(msg)
-                            }
+                            last_token = push_token(Token::Number(current_str.parse().unwrap()), &mut stack, &mut output)?;
                             current_str.clear();
                         }
                         break;
                     }
                     else {
                         read_state = ReadState::None; 
-                        match push_token(Token::Number(current_str.parse().unwrap()), &mut stack, &mut output) {
-                            Ok(token) => last_token = token,
-                            Err(msg) => return Err(msg)
-                        }
+                        last_token =  push_token(Token::Number(current_str.parse().unwrap()), &mut stack, &mut output)?;
                         current_str.clear();
                     }
                 },
@@ -196,34 +143,19 @@ fn parse(input: &str) -> Result<Vec<Token>, String> {
                     if c.is_alphabetic() || c.is_digit(10) {
                         current_str.push(c);
                         if i+1 == input.len() {
-                            if let Some(val) = get_variable(&current_str) {
-                                match push_token(Token::Number(val), &mut stack, &mut output) {
-                                    Ok(token) => last_token = token,
-                                    Err(msg) => return Err(msg)
-                                }
-                            }
-                            else { return Err(format!("Unknown variable '{}'", current_str)) }
+                            last_token = push_token(Token::Number(get_variable(&current_str)?), &mut stack, &mut output)?;
                             current_str.clear();
                         }
                         break;
                     }
                     else if c == '(' {
                         read_state = ReadState::None;
-                        match push_token(Token::Function(current_str.clone()), &mut stack, &mut output) {
-                            Ok(token) => last_token = token,
-                            Err(msg) => return Err(msg)
-                        }
+                        last_token =  push_token(Token::Function(current_str.clone()), &mut stack, &mut output)?;
                         current_str.clear();
                     }
                     else {
                         read_state = ReadState::None; 
-                        if let Some(val) = get_variable(&current_str) {
-                            match push_token(Token::Number(val), &mut stack, &mut output) {
-                                Ok(token) => last_token = token,
-                                Err(msg) => return Err(msg)
-                            }
-                        }
-                        else { return Err(format!("Unknown variable '{}'", current_str)) }
+                        last_token = push_token(Token::Number(get_variable(&current_str)?), &mut stack, &mut output)?;
                         current_str.clear();
                     }
                 },
@@ -251,12 +183,7 @@ fn parse(input: &str) -> Result<Vec<Token>, String> {
                             '^' => Some(Token::Operator{ operator: Operator::Power, unary: false, precedence: 4 }),
                             ',' => Some(Token::Comma),
                             _ => None
-                        } {
-                            match push_token(token, &mut stack, &mut output) {
-                                Ok(token) => last_token = token,
-                                Err(msg) => return Err(msg)
-                            }
-                        }
+                        } { last_token = push_token(token, &mut stack, &mut output)? }
                         else { return Err(format!("Invalid character '{}' in expression", c)) }
                     }
                     break;
@@ -273,6 +200,23 @@ fn parse(input: &str) -> Result<Vec<Token>, String> {
     Ok(output)
 }
 
+fn params(name: &str, stack: &mut Vec<f64>, args: usize, is_operator: bool) -> Result<Vec<f64>, String> {
+    if stack.len() >= args {
+        let index = stack.len() - args;
+        Ok(stack.split_off(index))
+    } 
+    else {
+        if is_operator {
+            Err(format!("Operator '{}' requires {} {}", name, args,
+                        if args > 1 { "operands" } else { "operand" }))
+        }
+        else {
+            Err(format!("Function '{}' requires {} {}", name, args,
+                        if args > 1 { "parameters" } else { "parameter" }))
+        }
+    }
+}
+
 fn solve(tokens: Vec<Token>) -> Result<f64, String> {
     let mut stack: Vec<f64> = Vec::new();
     for token in &tokens {
@@ -281,52 +225,34 @@ fn solve(tokens: Vec<Token>) -> Result<f64, String> {
             Token::Number(n) => result = n,
             Token::Operator{ operator, .. } => match operator {
                 Operator::Add => {
-                    if stack.len() >= 2 { result = stack.pop().unwrap() + stack.pop().unwrap() }
-                    else { return Err(String::from("Add operator requires 2 operands")) }
+                    let v = params("Add", &mut stack, 2, true)?;
+                    result = v[0] + v[1];
                 },
                 Operator::Subtract => {
-                    if stack.len() >= 2 {
-                        let n = stack.pop().unwrap();
-                        result = stack.pop().unwrap() - n;
-                    }
-                    else { return Err(String::from("Minus operator requires 2 operands")) }
+                    let v = params("Minus", &mut stack, 2, true)?;
+                    result = v[0] - v[1];
                 },
                 Operator::Multiply => {
-                    if stack.len() >= 2 { result = stack.pop().unwrap() * stack.pop().unwrap() }
-                    else { return Err(String::from("Multiply operator requires 2 operands")) }
+                    let v = params("Multiply", &mut stack, 2, true)?;
+                    result = v[0] * v[1];
                 },
                 Operator::Divide => {
-                    if stack.len() >= 2 {
-                        let n = stack.pop().unwrap();
-                        result = stack.pop().unwrap() / n;
-                    }
-                    else { return Err(String::from("Divide operator requires 2 operands")) }
+                    let v = params("Divide", &mut stack, 2, true)?;
+                    result = v[0] / v[1];
                 }
                 Operator::Modulus => {
-                    if stack.len() >= 2 {
-                        let n = stack.pop().unwrap();
-                        result = stack.pop().unwrap() % n;
-                    }
-                    else { return Err(String::from("Modulus operator requires 2 operands")) }
+                    let v = params("Modulus", &mut stack, 2, true)?;
+                    result = v[0] % v[1];
                 }
                 Operator::Negate =>  {
-                    if stack.len() >= 1 { result = -stack.pop().unwrap() }
-                    else { return Err(String::from("Negate operator has no operand")) }
+                    result = -(params("Negate", &mut stack, 1, true)?[0]);
                 },
                 Operator::Power => {
-                    if stack.len() >= 2 {
-                        let n = stack.pop().unwrap();
-                        result = stack.pop().unwrap().powf(n);
-                    }
-                    else { return Err(String::from("Exponent operator requires 2 operands")) }
+                    let v = params("Exponent", &mut stack, 2, true)?;
+                    result = v[0].powf(v[1]);
                 }
             },
-            Token::Function(ref name) => {
-                match run_function(name, &mut stack) {
-                    Ok(value) => result = value,
-                    Err(msg) => return Err(msg)
-                }
-            },
+            Token::Function(ref name) => result = run_function(name, &mut stack)?,
             _ => return Err(String::from("Invalid expression"))
         };
         stack.push(result);
@@ -336,10 +262,7 @@ fn solve(tokens: Vec<Token>) -> Result<f64, String> {
 }
 
 fn solve_expression(input: &str) -> Result<f64, String> {
-    match parse(input) {
-        Ok(tokens) => solve(tokens),
-        Err(msg) => Err(msg)
-    }
+    solve(parse(input)?)
 }
 
 fn main() {
@@ -363,7 +286,7 @@ fn main() {
 #[test]
 fn long_expression() {
     assert_eq!(Ok(100.0), solve_expression(&String::from("
-        ((abs(cos(((((--(abs((((1+1+(1+1)+1+1+(4*1))+1+(10-11))/10 * 10) % 9 - 10)^2-80+9))
+        (abs(cos(((((--(abs((((1+1+(1+1)+1+1+(4*1))+1+(10-11))/10 * 10) % 9 - 10)^2-80+9))
         *10/10+(2*2 + 6)-5-2-(2+1))*2.00000000-5.6-4.400000000000000000000)-9)*pi))*10.0*
-        sign(max(12.44343234, 11.84934))*add4(1.0, 2.0, -1.0, 1.0)/3)^2)+(2*2+2^2*2-2)-10")));
+        sign(max(12.44343234, 11.84934)))*(1+2+3+4)")));
 }
