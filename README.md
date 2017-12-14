@@ -1,7 +1,10 @@
-This is a calculator written in Rust.
-It can solve expressions containing all the basic things that you would expect:
+This is a calculator/expression evaluator written in Rust.
+It supports the following features:
 
-- Math operators
+- Arithmetic operators: multiplication, division, addition, subtraction, power, modulus, factorial
+- Relational operators: greater, greater-equal, less, less-equal, equal, not-equal
+- Boolean operators: not, and, nand, or, nor
+- Constants: pi, e ...
+- Functions: sin, cos, min, max, abs, sqrt ...
 - Parentheses
-- Variables
-- Functions
+- Variables (Not yet functional)
