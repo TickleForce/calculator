@@ -69,8 +69,6 @@ enum Operation {
     // multi-arg functions
     Min,
     Max,
-
-    Count
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -80,11 +78,12 @@ enum Token {
     ArgumentSeparator,
     Operator{ parameters: u32, precedence: Precedence, associativity: Associativity, operation: Operation },
     Function{ parameters: u32, operation: Operation },
-    Operand(f64),
+    Operand{ value: f64, var_index: Option<usize> },
 }
 
 struct Calculator {
-    results: Vec<f64>
+    results: Vec<f64>,
+    variables: Vec<(String, f64)>
 }
 
 fn operator(parameters: u32, precedence: Precedence, associativity: Associativity, operation: Operation) -> Result<Token, String> {
@@ -120,31 +119,36 @@ impl Calculator {
             }
         }
 
-        Token::Operand(digits.parse().unwrap())
+        Token::Operand{ value: digits.parse().unwrap(), var_index: None }
     }
 
-    fn get_identifier(&self, pos: &mut usize, chars: &Vec<char>) -> Result<Token, String> {
+    fn get_identifier(&mut self, pos: &mut usize, chars: &Vec<char>) -> Result<Token, String> {
         let mut ident = chars[*pos].to_string();
 
+        let mut is_func = false;
         loop {
             *pos += 1;
             if *pos == chars.len() {
                 break;
             }
             let ch = chars[*pos];
-            if ch.is_alphabetic() || ch.is_digit(10) {
+            if ch.is_alphabetic() || ch.is_digit(10) || ch == '_' {
                 ident.push(ch);
                 continue;
+            }
+            if ch == '(' {
+                is_func = true;
             }
             break;
         }
 
-        match ident.to_lowercase().as_ref() {
-            "pi"    => Ok(Token::Operand(std::f64::consts::PI)),
-            "tau"   => Ok(Token::Operand(std::f64::consts::PI * 2.0)),
-            "e"     => Ok(Token::Operand(std::f64::consts::E)),
-            "true"  => Ok(Token::Operand(1.0)),
-            "false" => Ok(Token::Operand(0.0)),
+        let identifier = ident.to_lowercase();
+        match identifier.as_ref() {
+            "pi"    => Ok(Token::Operand{ value: std::f64::consts::PI, var_index: None }),
+            "tau"   => Ok(Token::Operand{ value: std::f64::consts::PI * 2.0, var_index: None }),
+            "e"     => Ok(Token::Operand{ value: std::f64::consts::E, var_index: None }),
+            "true"  => Ok(Token::Operand{ value: 1.0, var_index: None }),
+            "false" => Ok(Token::Operand{ value: 0.0, var_index: None }),
 
             "not"  => operator(1, Precedence::Unary,  Associativity::None, Operation::Not),
             "mod"  => operator(2, Precedence::Multiplicative, Associativity::Left, Operation::Modulus),
@@ -171,11 +175,25 @@ impl Calculator {
             "max"  => Ok(Token::Function{ parameters: 2, operation: Operation::Max }),
             "pow"  => Ok(Token::Function{ parameters: 2, operation: Operation::Power }),
 
-            _ => Err(format!("Unknown identifier '{}'", ident))
+            _ => {
+                if is_func {
+                    Err(format!("Unknown function '{}'", ident))
+                }
+                else {
+                    if let Some(index) = self.variables.iter().position(|&(ref name, ..)| identifier == *name) {
+                        Ok(Token::Operand{ value: self.variables[index].1, var_index: Some(index) })
+                    }
+                    else {
+                        let new_var = Token::Operand{ value: 0.0, var_index: Some(self.variables.len()) };
+                        self.variables.push((identifier, 0.0));
+                        Ok(new_var)
+                    }
+                }
+            }
         }
     }
 
-    fn tokenize(&self, expression: &str) -> Result<Vec<Token>, String> {
+    fn tokenize(&mut self, expression: &str) -> Result<Vec<Token>, String> {
         if expression.len() == 0 {
             return Err(String::from("Expression is empty"));
         }
@@ -234,7 +252,7 @@ impl Calculator {
 
             else if ch == '+' {
                 match output.last() {
-                    Some(&Token::Operand(..)) |
+                    Some(&Token::Operand{ .. }) |
                     Some(&Token::RightParentheses) |
                     Some(&Token::Operator{ precedence: Precedence::Postfix, .. }) => {
                         output.push(operator(2, Precedence::Additive, Associativity::Left, Operation::Addition).unwrap());
@@ -248,7 +266,7 @@ impl Calculator {
 
             else if ch == '-' {
                 match output.last() {
-                    Some(&Token::Operand(..)) |
+                    Some(&Token::Operand{ .. }) |
                     Some(&Token::RightParentheses) |
                     Some(&Token::Operator{ precedence: Precedence::Postfix, .. }) => {
                         output.push(operator(2, Precedence::Additive, Associativity::Left, Operation::Subtraction).unwrap());
@@ -389,14 +407,15 @@ impl Calculator {
         Ok(output)
     }
 
-    fn evaluate_rpn(&self, tokens: Vec<Token>) -> Result<f64, String> {
+    fn evaluate_rpn(&mut self, tokens: Vec<Token>) -> Result<f64, String> {
 
         let mut params : Vec<f64> = Vec::new();
-        let mut operands : Vec<f64> = Vec::new();
+        let mut operands : Vec<Token> = Vec::new();
+        let mut var_indexes: Vec<Option<usize>> = Vec::new();
 
         for token in tokens {
             match token {
-                Token::Operand(value) => operands.push(value),
+                Token::Operand{ .. } => operands.push(token),
                 Token::Function{ parameters, operation } |
                 Token::Operator{ parameters, operation, .. } => {
 
@@ -405,61 +424,77 @@ impl Calculator {
                     }
 
                     params.clear();
+                    var_indexes.clear();
                     for _ in 0..parameters {
-                        params.insert(0, operands.pop().unwrap());
+                        let t = operands.pop().unwrap();
+                        match t {
+                            Token::Operand{ value, var_index } => {
+                                params.insert(0, value);
+                                var_indexes.insert(0, var_index);
+                            }
+                            _ => return Err(String::from("Invalid operand"))
+                        }
                     }
 
-                    match operation {
-                        Operation::Identity => operands.push(params[0]),
-                        Operation::Negation => operands.push(params[0] * -1.0),
-                        Operation::Not => operands.push(if params[0] == 0.0 { 1.0 } else { 0.0 }),
-                        Operation::Addition => operands.push(params[0] + params[1]),
-                        Operation::Subtraction => operands.push(params[0] - params[1]),
-                        Operation::Multiplication => operands.push(params[0] * params[1]),
-                        Operation::Division => operands.push(params[0] / params[1]),
-                        Operation::Modulus => operands.push(params[0] % params[1]),
-                        Operation::Equality => operands.push(if params[0] == params[1] { 1.0 } else { 0.0 }),
-                        Operation::Inequality => operands.push(if params[0] != params[1] { 1.0 } else { 0.0 }),
-                        Operation::Less => operands.push(if params[0] < params[1] { 1.0 } else { 0.0 }),
-                        Operation::LessEqual => operands.push(if params[0] <= params[1] { 1.0 } else { 0.0 }),
-                        Operation::Greater => operands.push(if params[0] > params[1] { 1.0 } else { 0.0 }),
-                        Operation::GreaterEqual => operands.push(if params[0] >= params[1] { 1.0 } else { 0.0 }),
-                        Operation::And => operands.push(if params[0] != 0.0 && params[1] != 0.0 { 1.0 } else { 0.0 }),
-                        Operation::Nand => operands.push(if params[0] != 0.0 && params[1] != 0.0 { 0.0 } else { 1.0 }),
-                        Operation::Or => operands.push(if params[0] != 0.0 || params[1] != 0.0 { 1.0 } else { 0.0 }),
-                        Operation::Nor => operands.push(if params[0] != 0.0 || params[1] != 0.0 { 0.0 } else { 1.0 }),
-                        Operation::Power => operands.push(params[0].powf(params[1])),
-                        Operation::Sin => operands.push(params[0].sin()),
-                        Operation::Cos => operands.push(params[0].cos()),
-                        Operation::Tan => operands.push(params[0].tan()),
-                        Operation::Abs => operands.push(params[0].abs()),
-                        Operation::Sqrt => operands.push(params[0].sqrt()),
-                        Operation::Radians => operands.push(params[0].to_radians()),
-                        Operation::Degrees => operands.push(params[0].to_degrees()),
-                        Operation::Min => operands.push(f64::min(params[0], params[1])),
-                        Operation::Max => operands.push(f64::max(params[0], params[1])),
+                    let result = match operation {
+                        Operation::Identity => params[0],
+                        Operation::Negation => params[0] * -1.0,
+                        Operation::Not => if params[0] == 0.0 { 1.0 } else { 0.0 },
+                        Operation::Addition => params[0] + params[1],
+                        Operation::Subtraction => params[0] - params[1],
+                        Operation::Multiplication => params[0] * params[1],
+                        Operation::Division => params[0] / params[1],
+                        Operation::Modulus => params[0] % params[1],
+                        Operation::Equality => if params[0] == params[1] { 1.0 } else { 0.0 },
+                        Operation::Inequality => if params[0] != params[1] { 1.0 } else { 0.0 },
+                        Operation::Less => if params[0] < params[1] { 1.0 } else { 0.0 },
+                        Operation::LessEqual => if params[0] <= params[1] { 1.0 } else { 0.0 },
+                        Operation::Greater => if params[0] > params[1] { 1.0 } else { 0.0 },
+                        Operation::GreaterEqual => if params[0] >= params[1] { 1.0 } else { 0.0 },
+                        Operation::And => if params[0] != 0.0 && params[1] != 0.0 { 1.0 } else { 0.0 },
+                        Operation::Nand => if params[0] != 0.0 && params[1] != 0.0 { 0.0 } else { 1.0 },
+                        Operation::Or => if params[0] != 0.0 || params[1] != 0.0 { 1.0 } else { 0.0 },
+                        Operation::Nor => if params[0] != 0.0 || params[1] != 0.0 { 0.0 } else { 1.0 },
+                        Operation::Power => params[0].powf(params[1]),
+                        Operation::Sin => params[0].sin(),
+                        Operation::Cos => params[0].cos(),
+                        Operation::Tan => params[0].tan(),
+                        Operation::Abs => params[0].abs(),
+                        Operation::Sqrt => params[0].sqrt(),
+                        Operation::Radians => params[0].to_radians(),
+                        Operation::Degrees => params[0].to_degrees(),
+                        Operation::Min => f64::min(params[0], params[1]),
+                        Operation::Max => f64::max(params[0], params[1]),
                         Operation::Result => {
                             let index = params[0] as usize;
                             if index < 1 || index > self.results.len() {
                                 return Err(String::from("Index out of range"));
                             }
-                            operands.push(self.results[index - 1]);
+                            self.results[index - 1]
                         }
-                        Operation::Ln => operands.push(params[0].ln()),
-                        Operation::Log2 => operands.push(params[0].log2()),
-                        Operation::Log10 => operands.push(params[0].log10()),
-                        Operation::Exp => operands.push(params[0].exp()),
-                        Operation::Sign => operands.push(params[0].signum()),
+                        Operation::Ln => params[0].ln(),
+                        Operation::Log2 => params[0].log2(),
+                        Operation::Log10 => params[0].log10(),
+                        Operation::Exp => params[0].exp(),
+                        Operation::Sign => params[0].signum(),
                         Operation::Factorial => {
                             let mut x = params[0] as i64;
                             let mut y = x;
                             for i in 1..y {
                                 x *= i;
                             }
-                            operands.push(x as f64);
+                            x as f64
                         },
-                        _ => return Err(String::from("Operation not implemented"))
-                    }
+                        Operation::Assignment => {
+                            match var_indexes[0] {
+                                Some(index) => self.variables[index].1 = params[1],
+                                _=> return Err(String::from("Assignment to non-variable"))
+                            }
+                            params[1]
+                        }
+                    };
+
+                    operands.push(Token::Operand{ value: result, var_index: None });
                 },
                 _ => { }
             }
@@ -470,20 +505,23 @@ impl Calculator {
         }
 
         match operands.first() {
-            Some(value) => Ok(*value),
+            Some(&Token::Operand{ value, .. }) => Ok(value),
             _ => Err(String::from("Insufficient operands"))
         }
     }
 
     fn evaluate_expression(&mut self, input: &str) -> Result<f64, String> {
-        let result = self.evaluate_rpn(self.parse(self.tokenize(input)?)?)?;
+        let tokens = self.tokenize(input)?;
+        let rpn_tokens = self.parse(tokens)?;
+        let result = self.evaluate_rpn(rpn_tokens)?;
         self.results.push(result);
         Ok(result)
     }
 
     fn new() -> Calculator {
         let results = Vec::new();
-        Calculator{ results }
+        let variables = Vec::new();
+        Calculator{ results, variables }
     }
 }
 
@@ -546,6 +584,17 @@ fn test_result() {
     assert_eq!(Ok(3.0), calculator.evaluate_expression(&String::from("result(2)")));
     assert_eq!(Ok(4.0), calculator.evaluate_expression(&String::from("result(3)")));
     assert_eq!(Ok(5.0), calculator.evaluate_expression(&String::from("result(4)")));
+}
+
+#[test]
+fn test_variables() {
+    let mut calculator = Calculator::new();
+    calculator.evaluate_expression("x = 1 + 1").unwrap();
+    calculator.evaluate_expression("y = x + 1").unwrap();
+    calculator.evaluate_expression("long_variable_name_123 = x * y + 1").unwrap();
+    assert_eq!(Ok(2.0), calculator.evaluate_expression(&String::from("x")));
+    assert_eq!(Ok(3.0), calculator.evaluate_expression(&String::from("y")));
+    assert_eq!(Ok(7.0), calculator.evaluate_expression(&String::from("long_variable_name_123")));
 }
 
 #[test]

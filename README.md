@@ -7,4 +7,5 @@ It supports the following features:
 - Constants: pi, e ...
 - Functions: sin, cos, min, max, abs, sqrt ...
 - Parentheses
-- Variables (Not yet functional)
+- Variables
+- Result Storage
